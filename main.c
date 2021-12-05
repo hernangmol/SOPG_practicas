@@ -29,25 +29,15 @@
 static pthread_t inet_thread;
 static int s_fd;
 static int new_fd;
+static int sig_recv = 0; // flag de sigint/sigterm recibida
+static int con_act = 0; // flag de conexión activa
+
+pthread_mutex_t mutexFlagCon = PTHREAD_MUTEX_INITIALIZER;
 
 /* handler para sigint y sigterm */
 void sigint_sigterm_handler(int sig) 
 {
-	write(std_out, "Cerrando...\n", 13); // mensaje de SIGINT/SIGTERM recibido
-	if(pthread_cancel(inet_thread) != 0)
-	{
-		perror("pthread_cancel");
-		exit(1);
-	}
-	if(pthread_join (inet_thread, NULL) != 0)
-	{
-		perror("pthread_join");
-		exit(1);
-	}
-	close(new_fd);
-	close(s_fd);
-	serial_close();
-	exit(0);
+	sig_recv = 1;
 }
 
 /* función para bloquear señales */
@@ -91,6 +81,10 @@ void *accept_thread(void *message)
 
 	while (1)
 	{
+		pthread_mutex_lock (&mutexFlagCon); // bloquea el flag de conexión para escribirlo 
+		con_act = 0; // no hay conexión activa
+		pthread_mutex_unlock (&mutexFlagCon); // libera el flag de conexión
+
 		// Aceptación de conexiones entrantes
 		write(std_out, "esperando conexión\n", 21); 
 		if ((new_fd = accept(s_fd, (struct sockaddr *)&clientaddr, &addr_len)) == -1)
@@ -98,6 +92,11 @@ void *accept_thread(void *message)
 			perror("accept");
 			exit(1);
 		}
+
+		pthread_mutex_lock (&mutexFlagCon); // bloquea el flag de conexión para escribirlo 
+		con_act = 1; // hay conexión activa
+		pthread_mutex_unlock (&mutexFlagCon); // libera el flag de conexión
+
 		write(std_out, "conexion aceptada\n", 18); 
 		char ipClient[32];
 		inet_ntop(AF_INET, &(clientaddr.sin_addr), ipClient, sizeof(ipClient));
@@ -225,8 +224,10 @@ int main(void)
 		}
 		if(longitud != 0)
 		{
-			if (strncmp(buff, msgButton1, 15) == 0)
+			pthread_mutex_lock (&mutexFlagCon); //bloquea el flag de conexión para leerlo
+			if ((strncmp(buff, msgButton1, 15) == 0) && (con_act == 1)) // si el mensaje coincide con el de este boton y hay conexión
 			{
+				pthread_mutex_unlock (&mutexFlagCon); //libera el flag de conexión
 				if (write(new_fd, ":LINE0TG\n", 10) == 1)
 				// Enviamos mensaje a cliente
 				{
@@ -234,8 +235,9 @@ int main(void)
 					exit(1);
 				}
 			}
-			else if (strncmp(buff, msgButton2, 15) == 0)
+			else if ((strncmp(buff, msgButton2, 15) == 0) && (con_act == 1))// si el mensaje coincide con el de este boton y hay conexión
 			{
+				pthread_mutex_unlock (&mutexFlagCon); //libera el flag de conexión
 				// Envío de mensaje a cliente
 				if (write(new_fd, ":LINE1TG\n", 10) == 1)
 				{
@@ -243,17 +245,18 @@ int main(void)
 					exit(1);
 				}
 			}
-			else if (strncmp(buff, msgButton3, 15) == 0)
+			else if ((strncmp(buff, msgButton3, 15) == 0) && (con_act == 1))// si el mensaje coincide con el de este boton y hay conexión
 			{
-				// Envío de mensaje a cliente
+				pthread_mutex_unlock (&mutexFlagCon); //libera el flag de conexión
 				if (write(new_fd, ":LINE2TG\n", 10) == 1)
 				{
 					perror("socket: write");
 					exit(1);
 				}
 			}
-			else if (strncmp(buff, msgButton4, 15) == 0)
+			else if ((strncmp(buff, msgButton4, 15) == 0) && (con_act == 1))// si el mensaje coincide con el de este boton y hay conexión
 			{
+				pthread_mutex_unlock (&mutexFlagCon); //libera el flag de conexión
 				// Envío de mensaje a cliente
 				if (write(new_fd, ":LINE3TG\n", 10) == 1)
 				{
@@ -261,9 +264,28 @@ int main(void)
 					exit(1);
 				}
 			}
+			else // si el mensaje no coincide con ningun boton
+			{
+				pthread_mutex_unlock (&mutexFlagCon); //libera el flag de conexión
+			}
 		}
+		if(sig_recv == 1)
+			break;
 		usleep(10000);
 	}
-	exit(EXIT_SUCCESS);
+	write(std_out, " Cerrando...\n", 13); // mensaje de SIGINT/SIGTERM recibido
+	if(pthread_cancel(inet_thread) != 0)
+	{
+		perror("pthread_cancel");
+		exit(1);
+	}
+	if(pthread_join (inet_thread, NULL) != 0)
+	{
+		perror("pthread_join");
+		exit(1);
+	}
+	close(new_fd);
+	close(s_fd);
+	serial_close();
 	return 0;
 }

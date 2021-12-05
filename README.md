@@ -1,2 +1,3 @@
 # SOPG_practicas
-Parcticas de SOPG - CESE
+TP2 de SOPG - CESE
+Hernán Gomez Molino
